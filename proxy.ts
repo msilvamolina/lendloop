@@ -1,11 +1,8 @@
-import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+import { clerkMiddleware } from "@clerk/nextjs/server";
 
-// Page-level guard for the signed-in area. Data access is enforced again in every Convex function.
-const isPublicRoute = createRouteMatcher(["/"]);
-
-export default clerkMiddleware(async (auth, req) => {
-  if (!isPublicRoute(req)) await auth.protect();
-});
+// Makes the Clerk session available to server components. Access checks live where the data is:
+// the (board) layout calls auth.protect(), and every Convex function checks the caller again.
+export default clerkMiddleware();
 
 export const config = {
   matcher: [
