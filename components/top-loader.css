@@ -1,0 +1,4 @@
+/* A light hairline around the bar so it still reads where it crosses dark surfaces. */
+#nprogress .bar {
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--background) 72%, transparent);
+}

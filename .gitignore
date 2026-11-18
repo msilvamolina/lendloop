@@ -1,0 +1,12 @@
+node_modules
+.next
+.env
+.env*.local
+.env.*
+!.env.example
+next-env.d.ts
+*.tsbuildinfo
+.convex
+.vercel
+coverage
+.clerk
