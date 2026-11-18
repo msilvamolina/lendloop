@@ -1,0 +1,211 @@
+{
+  "id": "LLnotifyWorkflow",
+  "name": "LendLoop - Request notification",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "LLerrorsWorkflow",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "none"
+  },
+  "nodes": [
+    {
+      "id": "6f0b9d2e-1a51-4c1e-9a0e-2d1f7c1a0001",
+      "name": "Loan event webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 300],
+      "webhookId": "0d6c3c5e-7b8f-4b39-8f55-6b7f3b2a0a01",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lendloop-loan-events",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      }
+    },
+    {
+      "id": "6f0b9d2e-1a51-4c1e-9a0e-2d1f7c1a0002",
+      "name": "Verify signature",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 300],
+      "notes": "HMAC-SHA256 over `${timestamp}.${rawBody}` with LENDLOOP_WEBHOOK_SECRET (env var, never in this file). 5 minute replay window, constant-time compare.",
+      "parameters": {
+        "jsCode": "// Verifies the signature Convex puts on every loan event. The secret lives in the LENDLOOP_WEBHOOK_SECRET env var.\nconst crypto = require('crypto');\nconst item = $input.first();\nconst headers = item.json.headers || {};\nconst timestamp = String(headers['x-lendloop-timestamp'] || '');\nconst signature = String(headers['x-lendloop-signature'] || '');\nlet raw;\ntry {\n  raw = (await this.helpers.getBinaryDataBuffer(0, 'data')).toString('utf8');\n} catch (error) {\n  // Fallback when the raw body is not kept as binary: Convex sends JSON.stringify output, which round-trips byte for byte.\n  raw = JSON.stringify(item.json.body);\n}\nconst secret = $env.LENDLOOP_WEBHOOK_SECRET;\nconst reject = (reason) => {\n  console.warn('[LendLoop] rejected webhook call:', reason);\n  return [{ json: { valid: false } }];\n};\nif (!secret) return reject('LENDLOOP_WEBHOOK_SECRET is not set');\nif (!/^\\d{10}$/.test(timestamp)) return reject('missing or malformed timestamp');\nif (Math.abs(Date.now() / 1000 - Number(timestamp)) > 300) return reject('timestamp outside replay window');\nconst expected = Buffer.from('sha256=' + crypto.createHmac('sha256', secret).update(timestamp + '.' + raw).digest('hex'));\nconst received = Buffer.from(signature);\nif (expected.length !== received.length || !crypto.timingSafeEqual(expected, received)) return reject('bad signature');\nreturn [{ json: { valid: true, event: JSON.parse(raw) } }];\n"
+      }
+    },
+    {
+      "id": "6f0b9d2e-1a51-4c1e-9a0e-2d1f7c1a0003",
+      "name": "Signature valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [440, 300],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "b1c7a3c2-55b0-4c55-9a43-1d3c1c9a0001",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "6f0b9d2e-1a51-4c1e-9a0e-2d1f7c1a0004",
+      "name": "Accept (202)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [660, 200],
+      "parameters": {
+        "respondWith": "noData",
+        "options": {
+          "responseCode": 202
+        }
+      }
+    },
+    {
+      "id": "6f0b9d2e-1a51-4c1e-9a0e-2d1f7c1a0005",
+      "name": "Reject (401)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [660, 420],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"error\": \"unauthorized\" } }}",
+        "options": {
+          "responseCode": 401
+        }
+      }
+    },
+    {
+      "id": "6f0b9d2e-1a51-4c1e-9a0e-2d1f7c1a0006",
+      "name": "Drop duplicate events",
+      "type": "n8n-nodes-base.removeDuplicates",
+      "typeVersion": 2,
+      "position": [880, 200],
+      "notes": "Convex retries until it gets a 2xx, so the same eventId can arrive twice (e.g. a timeout after we already answered). Each eventId is processed once.",
+      "parameters": {
+        "operation": "removeItemsSeenInPreviousExecutions",
+        "logic": "removeItemsWithAlreadySeenKeyValues",
+        "dedupeValue": "={{ $json.event.eventId }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "6f0b9d2e-1a51-4c1e-9a0e-2d1f7c1a0007",
+      "name": "Write message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 200],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Turns the minimal event into one line for one person. The payload carries no email or contact data.\nconst e = $json.event;\nconst name = e.recipient.firstName;\nconst tool = e.loan.toolName;\nconst dates = e.loan.startDate + ' to ' + e.loan.endDate;\nconst messages = {\n  'loan.requested': name + ', a neighbor asked to borrow your ' + tool + ' (' + dates + '). Open LendLoop to approve or decline.',\n  'loan.approved': name + ', your request for the ' + tool + ' (' + dates + ') was approved.',\n  'loan.declined': name + ', your request for the ' + tool + ' (' + dates + ') was declined.',\n  'loan.cancelled': name + ', a request for your ' + tool + ' (' + dates + ') was cancelled by the borrower.',\n  'loan.returned': name + ', the ' + tool + ' was marked returned. Thanks for borrowing!',\n};\nreturn { json: { eventId: e.eventId, type: e.type, clerkUserId: e.recipient.clerkUserId, text: messages[e.type] || ('Update on ' + tool + ': ' + e.type) } };\n"
+      }
+    },
+    {
+      "id": "6f0b9d2e-1a51-4c1e-9a0e-2d1f7c1a0008",
+      "name": "Notify (mock, logged)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1320, 200],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Mock channel: the notification is written to the n8n log and kept in the execution data.\nconsole.log('[LendLoop notification]', JSON.stringify({ eventId: $json.eventId, to: $json.clerkUserId, text: $json.text }));\nreturn { json: { ...$json, channel: 'mock', deliveredAt: new Date().toISOString() } };\n"
+      }
+    },
+    {
+      "id": "6f0b9d2e-1a51-4c1e-9a0e-2d1f7c1a0009",
+      "name": "Look up email in Clerk (optional)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1540, 200],
+      "disabled": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "notes": "Optional real email path. Needs a Header Auth credential (Authorization: Bearer <Clerk secret key>) created in n8n. The email is fetched only at send time and never stored in Convex.",
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.clerk.com/v1/users/{{ encodeURIComponent($json.clerkUserId) }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 10000
+        }
+      }
+    },
+    {
+      "id": "6f0b9d2e-1a51-4c1e-9a0e-2d1f7c1a0010",
+      "name": "Send email (optional)",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1760, 200],
+      "disabled": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 10000,
+      "notes": "Optional. Needs an SMTP credential created in n8n.",
+      "parameters": {
+        "fromEmail": "LendLoop <no-reply@lendloop.example>",
+        "toEmail": "={{ $json.email_addresses.find(a => a.id === $json.primary_email_address_id).email_address }}",
+        "subject": "LendLoop update",
+        "emailFormat": "text",
+        "text": "={{ $('Write message').item.json.text }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Loan event webhook": {
+      "main": [[{ "node": "Verify signature", "type": "main", "index": 0 }]]
+    },
+    "Verify signature": {
+      "main": [[{ "node": "Signature valid?", "type": "main", "index": 0 }]]
+    },
+    "Signature valid?": {
+      "main": [
+        [{ "node": "Accept (202)", "type": "main", "index": 0 }],
+        [{ "node": "Reject (401)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Accept (202)": {
+      "main": [[{ "node": "Drop duplicate events", "type": "main", "index": 0 }]]
+    },
+    "Drop duplicate events": {
+      "main": [[{ "node": "Write message", "type": "main", "index": 0 }]]
+    },
+    "Write message": {
+      "main": [[{ "node": "Notify (mock, logged)", "type": "main", "index": 0 }]]
+    },
+    "Notify (mock, logged)": {
+      "main": [[{ "node": "Look up email in Clerk (optional)", "type": "main", "index": 0 }]]
+    },
+    "Look up email in Clerk (optional)": {
+      "main": [[{ "node": "Send email (optional)", "type": "main", "index": 0 }]]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}

@@ -1,0 +1,73 @@
+{
+  "id": "LLerrorsWorkflow",
+  "name": "LendLoop - Error handler",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all"
+  },
+  "nodes": [
+    {
+      "id": "8b2d3f40-3c73-4e30-9c20-4f3b9e3c0001",
+      "name": "On workflow error",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [0, 300],
+      "parameters": {}
+    },
+    {
+      "id": "8b2d3f40-3c73-4e30-9c20-4f3b9e3c0002",
+      "name": "Log and sign report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 300],
+      "notes": "Only workflow name, node name, execution id and the error message leave n8n. No item data, so no user data ends up in the log.",
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\nconst { execution = {}, workflow = {} } = $input.first().json;\nconst report = {\n  executionId: String(execution.id || ('manual-' + Date.now())),\n  workflowName: String(workflow.name || 'unknown workflow'),\n  nodeName: String(execution.lastNodeExecuted || 'unknown node'),\n  message: String((execution.error && execution.error.message) || 'unknown error').slice(0, 400),\n};\nconsole.error('[LendLoop workflow error]', JSON.stringify(report));\nconst body = JSON.stringify(report);\nconst timestamp = Math.floor(Date.now() / 1000).toString();\nconst signature = 'sha256=' + crypto.createHmac('sha256', $env.LENDLOOP_INBOUND_SECRET).update(timestamp + '.' + body).digest('hex');\nreturn [{ json: { body, timestamp, signature } }];\n"
+      }
+    },
+    {
+      "id": "8b2d3f40-3c73-4e30-9c20-4f3b9e3c0003",
+      "name": "Report to Convex automation log",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 300],
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000,
+      "notes": "Idempotent on executionId. If Convex is unreachable too, the failure is still visible in n8n's own execution list (error executions are always saved).",
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.LENDLOOP_CONVEX_SITE_URL }}/n8n/workflow-error",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-lendloop-timestamp", "value": "={{ $json.timestamp }}" },
+            { "name": "x-lendloop-signature", "value": "={{ $json.signature }}" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.body }}",
+        "options": {
+          "timeout": 15000
+        }
+      }
+    }
+  ],
+  "connections": {
+    "On workflow error": {
+      "main": [[{ "node": "Log and sign report", "type": "main", "index": 0 }]]
+    },
+    "Log and sign report": {
+      "main": [[{ "node": "Report to Convex automation log", "type": "main", "index": 0 }]]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}

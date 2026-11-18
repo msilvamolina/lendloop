@@ -23,6 +23,8 @@ export default defineSchema({
   // One row per Clerk user. No email stored: it is only read from the JWT to decide the admin role.
   users: defineTable({
     tokenIdentifier: v.string(),
+    // Opaque Clerk id: lets n8n resolve an email at send time (optional email path) without Convex storing it.
+    clerkUserId: v.string(),
     name: v.string(),
     role: v.union(v.literal("admin"), v.literal("user")),
     trusted: v.boolean(),

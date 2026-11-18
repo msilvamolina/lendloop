@@ -47,7 +47,7 @@ export const loadDelivery = internalQuery({
         type: `loan.${event.loanStatus}`,
         occurredAt: new Date(event._creationTime).toISOString(),
         loan: { id: loan._id, toolName: loan.toolName, startDate: loan.startDate, endDate: loan.endDate },
-        recipient: { userId: recipientId, firstName: recipient?.name ?? "Neighbor" },
+        recipient: { clerkUserId: recipient?.clerkUserId ?? null, firstName: recipient?.name ?? "Neighbor" },
       },
     };
   },

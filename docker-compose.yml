@@ -1,0 +1,35 @@
+# n8n for local development. Secrets come from n8n/.env (copy n8n/.env.example), never from this file.
+services:
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:2.48.4
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    env_file:
+      - ./n8n/.env
+    environment:
+      GENERIC_TIMEZONE: UTC
+      TZ: UTC
+      N8N_HOST: localhost
+      N8N_PORT: 5678
+      N8N_PROTOCOL: http
+      WEBHOOK_URL: http://localhost:5678/
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: "true"
+      # The Code nodes read only the LENDLOOP_* secrets from the environment and use Node's crypto for HMAC.
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      NODE_FUNCTION_ALLOW_BUILTIN: crypto
+      # Keep failed executions so they can be inspected; trim successful ones.
+      EXECUTIONS_DATA_SAVE_ON_ERROR: all
+      EXECUTIONS_DATA_SAVE_ON_SUCCESS: none
+      EXECUTIONS_DATA_PRUNE: "true"
+      EXECUTIONS_DATA_MAX_AGE: 336
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./n8n/workflows:/workflows:ro
+    # Lets the container reach the Convex local backend running on the host (127.0.0.1:3211).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  n8n_data:

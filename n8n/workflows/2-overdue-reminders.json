@@ -1,0 +1,211 @@
+{
+  "id": "LLremindWorkflow",
+  "name": "LendLoop - Overdue reminders",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "LLerrorsWorkflow",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all"
+  },
+  "nodes": [
+    {
+      "id": "7a1c2e3f-2b62-4d2f-8b1f-3e2a8d2b0001",
+      "name": "Every day at 08:00 UTC",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 300],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "7a1c2e3f-2b62-4d2f-8b1f-3e2a8d2b0002",
+      "name": "Sign page request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 300],
+      "notes": "Signs the request body with LENDLOOP_INBOUND_SECRET (env var). Runs once per page: the first time from the trigger, then with the cursor of the previous page.",
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\nconst previous = $input.first().json;\n// One business day per run, fixed at the start, so a run that crosses midnight stays on the same day.\nconst asOf = previous.asOf || new Date().toISOString().slice(0, 10);\nconst body = JSON.stringify({ asOf, cursor: previous.cursor || null });\nconst timestamp = Math.floor(Date.now() / 1000).toString();\nconst signature = 'sha256=' + crypto.createHmac('sha256', $env.LENDLOOP_INBOUND_SECRET).update(timestamp + '.' + body).digest('hex');\nreturn [{ json: { body, timestamp, signature } }];\n"
+      }
+    },
+    {
+      "id": "7a1c2e3f-2b62-4d2f-8b1f-3e2a8d2b0003",
+      "name": "Fetch overdue loans (Convex)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 300],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.LENDLOOP_CONVEX_SITE_URL }}/n8n/overdue-loans",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-lendloop-timestamp", "value": "={{ $json.timestamp }}" },
+            { "name": "x-lendloop-signature", "value": "={{ $json.signature }}" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.body }}",
+        "options": {
+          "timeout": 15000
+        }
+      }
+    },
+    {
+      "id": "7a1c2e3f-2b62-4d2f-8b1f-3e2a8d2b0004",
+      "name": "One item per loan",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, 200],
+      "parameters": {
+        "jsCode": "const page = $input.first().json;\nreturn page.loans.map((loan) => ({ json: { ...loan, asOf: page.asOf } }));\n"
+      }
+    },
+    {
+      "id": "7a1c2e3f-2b62-4d2f-8b1f-3e2a8d2b0005",
+      "name": "More pages?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [660, 440],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "c2d8b4d3-66c1-4d66-8b54-2e4d2d8b0001",
+              "leftValue": "={{ $json.isDone }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "7a1c2e3f-2b62-4d2f-8b1f-3e2a8d2b0006",
+      "name": "Next cursor",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 440],
+      "parameters": {
+        "jsCode": "const page = $input.first().json;\nreturn [{ json: { asOf: page.asOf, cursor: page.cursor } }];\n"
+      }
+    },
+    {
+      "id": "7a1c2e3f-2b62-4d2f-8b1f-3e2a8d2b0007",
+      "name": "Send reminder (mock, logged)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 200],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput",
+      "notes": "If this still fails after its retries, the item continues with an error field and is written back as status=failed, so one bad loan does not stop the others.",
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const text = $json.borrower.firstName + ', the ' + $json.toolName + ' was due back on ' + $json.endDate + ' (' + $json.daysOverdue + ' day(s) ago). Please return it or contact the lender in LendLoop.';\nconsole.log('[LendLoop reminder]', JSON.stringify({ loanId: $json.loanId, to: $json.borrower.clerkUserId, text }));\nreturn { json: { loanId: $json.loanId, asOf: $json.asOf, delivered: true } };\n"
+      }
+    },
+    {
+      "id": "7a1c2e3f-2b62-4d2f-8b1f-3e2a8d2b0008",
+      "name": "Sign write-back",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 200],
+      "notes": "Convex stores the result under the idempotency key reminder:<loanId>:<asOf>, so retries and re-runs never create a second record.",
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const crypto = require('crypto');\nconst source = $('One item per loan').item.json;\nconst failed = !$json.delivered;\nconst body = JSON.stringify({\n  loanId: source.loanId,\n  asOf: source.asOf,\n  status: failed ? 'failed' : 'sent',\n  detail: failed ? String(($json.error && $json.error.message) || $json.error || 'reminder failed').slice(0, 300) : 'mock reminder logged by n8n',\n});\nconst timestamp = Math.floor(Date.now() / 1000).toString();\nconst signature = 'sha256=' + crypto.createHmac('sha256', $env.LENDLOOP_INBOUND_SECRET).update(timestamp + '.' + body).digest('hex');\nreturn { json: { body, timestamp, signature } };\n"
+      }
+    },
+    {
+      "id": "7a1c2e3f-2b62-4d2f-8b1f-3e2a8d2b0009",
+      "name": "Write reminder status (Convex)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1320, 200],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.LENDLOOP_CONVEX_SITE_URL }}/n8n/reminder-status",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-lendloop-timestamp", "value": "={{ $json.timestamp }}" },
+            { "name": "x-lendloop-signature", "value": "={{ $json.signature }}" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.body }}",
+        "options": {
+          "timeout": 15000
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every day at 08:00 UTC": {
+      "main": [[{ "node": "Sign page request", "type": "main", "index": 0 }]]
+    },
+    "Sign page request": {
+      "main": [[{ "node": "Fetch overdue loans (Convex)", "type": "main", "index": 0 }]]
+    },
+    "Fetch overdue loans (Convex)": {
+      "main": [
+        [
+          { "node": "One item per loan", "type": "main", "index": 0 },
+          { "node": "More pages?", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "More pages?": {
+      "main": [[{ "node": "Next cursor", "type": "main", "index": 0 }], []]
+    },
+    "Next cursor": {
+      "main": [[{ "node": "Sign page request", "type": "main", "index": 0 }]]
+    },
+    "One item per loan": {
+      "main": [[{ "node": "Send reminder (mock, logged)", "type": "main", "index": 0 }]]
+    },
+    "Send reminder (mock, logged)": {
+      "main": [[{ "node": "Sign write-back", "type": "main", "index": 0 }]]
+    },
+    "Sign write-back": {
+      "main": [[{ "node": "Write reminder status (Convex)", "type": "main", "index": 0 }]]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}

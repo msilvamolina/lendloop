@@ -35,10 +35,10 @@ export const overduePage = internalQuery({
         toolName: loan.toolName,
         endDate: loan.endDate,
         daysOverdue: daysBetween(loan.endDate, asOf),
-        borrower: { userId: loan.borrowerId, firstName: borrower?.name ?? "Neighbor" },
+        borrower: { clerkUserId: borrower?.clerkUserId ?? null, firstName: borrower?.name ?? "Neighbor" },
       });
     }
-    return { loans, cursor: page.continueCursor, isDone: page.isDone };
+    return { asOf, loans, cursor: page.continueCursor, isDone: page.isDone };
   },
 });
 

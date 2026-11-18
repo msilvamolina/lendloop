@@ -16,7 +16,13 @@ export const ensure = mutation({
       if (existing.name !== name || existing.role !== role) await ctx.db.patch(existing._id, { name, role });
       return existing._id;
     }
-    return await ctx.db.insert("users", { tokenIdentifier: identity.tokenIdentifier, name, role, trusted: false });
+    return await ctx.db.insert("users", {
+      tokenIdentifier: identity.tokenIdentifier,
+      clerkUserId: identity.subject,
+      name,
+      role,
+      trusted: false,
+    });
   },
 });
 
