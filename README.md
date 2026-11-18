@@ -66,9 +66,15 @@ docker compose exec n8n n8n import:workflow --separate --input=/workflows
 
 Then open http://localhost:5678, create the owner account, and:
 
-1. Open **LendLoop - Request notification** and **LendLoop - Overdue reminders**, check that *Settings → Error
-   workflow* points to **LendLoop - Error handler**, and activate (publish) both. The error handler runs on its own and
-   does not need activating.
+1. Check that *Settings → Error workflow* of **LendLoop - Request notification** and **LendLoop - Overdue reminders**
+   points to **LendLoop - Error handler** (the import keeps the ids, so it should), then publish all three. In n8n 2.x
+   the error handler must be published too, otherwise n8n refuses to run it. From the command line:
+
+```bash
+for id in LLnotifyWorkflow LLremindWorkflow LLerrorsWorkflow; do docker compose exec n8n n8n publish:workflow --id=$id; done
+docker compose restart n8n
+```
+
 2. Give Convex the matching values:
 
 ```bash
@@ -78,7 +84,7 @@ npx convex env set N8N_INBOUND_SECRET <same as LENDLOOP_INBOUND_SECRET in n8n/.e
 ```
 
 To try it: request a tool in the app and watch the n8n log (`docker compose logs -f n8n`) for the mock notification;
-run the overdue workflow by hand (*Execute workflow*) after `seed:demo` and the loan card shows "Reminder sent just
+run the overdue workflow by hand (its *Run now* trigger, or `n8n execute --id LLremindWorkflow`) after `seed:demo` and the loan card shows "Reminder sent just
 now". Everything n8n did, or failed to do, is in the app under **Admin → Automation log**.
 
 No secret lives in the workflow JSON: the Code nodes read `$env.LENDLOOP_*`, and the optional Clerk/SMTP nodes take
@@ -224,9 +230,16 @@ npm run build
   unsigned / wrong-secret / stale calls, reminder write-backs are idempotent, error reports dedupe, and the webhook is
   signed and retried until n8n accepts it.
 
-I ran the HTTP endpoints against the local Convex backend too (signed and unsigned requests). I did not run the n8n
-workflows: Docker is not installed on the machine I built this on, so the workflow JSON is checked against n8n's node
-definitions (2.48) but not executed.
+I also ran the whole chain once against the local Convex backend and n8n 2.48.4 (run with `npx`, as Docker was not
+available on the machine I built this on, so `docker-compose.yml` itself is untested):
+
+- the three workflow files import with their ids;
+- a borrow request reached the n8n webhook signed and the event was marked `sent`; the webhook answered 401 to a
+  wrong secret and to a stale timestamp;
+- the overdue workflow fetched the seeded overdue loan, logged the reminder and wrote `sent` back; a second run found
+  nothing to do;
+- a malformed event made the notification workflow fail, and the error handler reported it to Convex, where it shows
+  in the automation log as `n8n-error:<execution id>`.
 
 ## What I'd change for production
 

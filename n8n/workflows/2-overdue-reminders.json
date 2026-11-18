@@ -14,7 +14,10 @@
       "name": "Every day at 08:00 UTC",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
-      "position": [0, 300],
+      "position": [
+        0,
+        300
+      ],
       "parameters": {
         "rule": {
           "interval": [
@@ -27,11 +30,25 @@
       }
     },
     {
+      "id": "7a1c2e3f-2b62-4d2f-8b1f-3e2a8d2b0010",
+      "name": "Run now (manual)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        480
+      ],
+      "parameters": {}
+    },
+    {
       "id": "7a1c2e3f-2b62-4d2f-8b1f-3e2a8d2b0002",
       "name": "Sign page request",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [220, 300],
+      "position": [
+        220,
+        300
+      ],
       "notes": "Signs the request body with LENDLOOP_INBOUND_SECRET (env var). Runs once per page: the first time from the trigger, then with the cursor of the previous page.",
       "parameters": {
         "jsCode": "const crypto = require('crypto');\nconst previous = $input.first().json;\n// One business day per run, fixed at the start, so a run that crosses midnight stays on the same day.\nconst asOf = previous.asOf || new Date().toISOString().slice(0, 10);\nconst body = JSON.stringify({ asOf, cursor: previous.cursor || null });\nconst timestamp = Math.floor(Date.now() / 1000).toString();\nconst signature = 'sha256=' + crypto.createHmac('sha256', $env.LENDLOOP_INBOUND_SECRET).update(timestamp + '.' + body).digest('hex');\nreturn [{ json: { body, timestamp, signature } }];\n"
@@ -42,7 +59,10 @@
       "name": "Fetch overdue loans (Convex)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [440, 300],
+      "position": [
+        440,
+        300
+      ],
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 5000,
@@ -52,8 +72,14 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "x-lendloop-timestamp", "value": "={{ $json.timestamp }}" },
-            { "name": "x-lendloop-signature", "value": "={{ $json.signature }}" }
+            {
+              "name": "x-lendloop-timestamp",
+              "value": "={{ $json.timestamp }}"
+            },
+            {
+              "name": "x-lendloop-signature",
+              "value": "={{ $json.signature }}"
+            }
           ]
         },
         "sendBody": true,
@@ -70,7 +96,10 @@
       "name": "One item per loan",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [660, 200],
+      "position": [
+        660,
+        200
+      ],
       "parameters": {
         "jsCode": "const page = $input.first().json;\nreturn page.loans.map((loan) => ({ json: { ...loan, asOf: page.asOf } }));\n"
       }
@@ -80,7 +109,10 @@
       "name": "More pages?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [660, 440],
+      "position": [
+        660,
+        440
+      ],
       "parameters": {
         "conditions": {
           "options": {
@@ -110,7 +142,10 @@
       "name": "Next cursor",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [880, 440],
+      "position": [
+        880,
+        440
+      ],
       "parameters": {
         "jsCode": "const page = $input.first().json;\nreturn [{ json: { asOf: page.asOf, cursor: page.cursor } }];\n"
       }
@@ -120,7 +155,10 @@
       "name": "Send reminder (mock, logged)",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [880, 200],
+      "position": [
+        880,
+        200
+      ],
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 5000,
@@ -136,7 +174,10 @@
       "name": "Sign write-back",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1100, 200],
+      "position": [
+        1100,
+        200
+      ],
       "notes": "Convex stores the result under the idempotency key reminder:<loanId>:<asOf>, so retries and re-runs never create a second record.",
       "parameters": {
         "mode": "runOnceForEachItem",
@@ -148,7 +189,10 @@
       "name": "Write reminder status (Convex)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1320, 200],
+      "position": [
+        1320,
+        200
+      ],
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 5000,
@@ -158,8 +202,14 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "x-lendloop-timestamp", "value": "={{ $json.timestamp }}" },
-            { "name": "x-lendloop-signature", "value": "={{ $json.signature }}" }
+            {
+              "name": "x-lendloop-timestamp",
+              "value": "={{ $json.timestamp }}"
+            },
+            {
+              "name": "x-lendloop-signature",
+              "value": "={{ $json.signature }}"
+            }
           ]
         },
         "sendBody": true,
@@ -174,33 +224,109 @@
   ],
   "connections": {
     "Every day at 08:00 UTC": {
-      "main": [[{ "node": "Sign page request", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Sign page request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Sign page request": {
-      "main": [[{ "node": "Fetch overdue loans (Convex)", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Fetch overdue loans (Convex)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Fetch overdue loans (Convex)": {
       "main": [
         [
-          { "node": "One item per loan", "type": "main", "index": 0 },
-          { "node": "More pages?", "type": "main", "index": 0 }
+          {
+            "node": "One item per loan",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "More pages?",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
     "More pages?": {
-      "main": [[{ "node": "Next cursor", "type": "main", "index": 0 }], []]
+      "main": [
+        [
+          {
+            "node": "Next cursor",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
     },
     "Next cursor": {
-      "main": [[{ "node": "Sign page request", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Sign page request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "One item per loan": {
-      "main": [[{ "node": "Send reminder (mock, logged)", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Send reminder (mock, logged)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Send reminder (mock, logged)": {
-      "main": [[{ "node": "Sign write-back", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Sign write-back",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Sign write-back": {
-      "main": [[{ "node": "Write reminder status (Convex)", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Write reminder status (Convex)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run now (manual)": {
+      "main": [
+        [
+          {
+            "node": "Sign page request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "pinData": {},
